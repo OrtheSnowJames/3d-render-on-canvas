@@ -2,9 +2,12 @@ const express = require('express');
 const { createServer } = require('node:http');
 const { join } = require('node:path');
 const { Server } = require('socket.io');
-const { fs } = require('fs');
+const fs = require('fs');
 const { isUtf8 } = require('node:buffer');
 const { error } = require('node:console');
+const { utf8 } = require ('fs')
+const { writeFile} = require('fs');
+const { readFile } = require('fs');
 
   const app = express();
   const server = createServer(app);
@@ -12,10 +15,11 @@ const io = new Server(server);
 
 app.get('/', (req, res) => {
   res.sendFile(join(__dirname, 'client/index.html'));
+  res.sendFile(join(__dirname, 'client/script.js'));
 });
 var content;
 fs.readFile('/content.json', utf8, (error, data) => {
-  if (err){console.log('error getting content')}
+  if (error){console.log('error getting content')}
   else{content = data;};
 });
 io.on('connection', (socket) => {
@@ -31,12 +35,13 @@ io.on('connection', (socket) => {
       }
     }
   });
+  
 });
 var currentContent;
 loop();
 function loop(){
   fs.readFile('content.json', isUtf8, (error, data) => {
-    if(err){console.error('error getting new content', error)}
+    if(error){console.error('error getting new content', error)}
     try{
       currentContent = JSON.parse(data);
     }
@@ -51,7 +56,7 @@ function loop(){
       }
     });
   }
-  requestAnimationFrame(loop);
+  setTimeout(loop, 16)
 }
 
   server.listen(3000, () => {
