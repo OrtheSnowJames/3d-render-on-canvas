@@ -1,64 +1,87 @@
 const express = require('express');
+const path = require('path')
 const { createServer } = require('node:http');
 const { join } = require('node:path');
 const { Server } = require('socket.io');
 const fs = require('fs');
-const { isUtf8 } = require('node:buffer');
-const { error } = require('node:console');
-const { utf8 } = require ('fs')
-const { writeFile} = require('fs');
-const { readFile } = require('fs');
 
-  const app = express();
-  const server = createServer(app);
+const app = express();
+const server = createServer(app);
 const io = new Server(server);
 
+app.use('/client', express.static(path.join(__dirname, 'client'), {
+   setHeaders: (res, path) => {
+       if (path.endsWith('.js')) {
+           res.setHeader('Content-Type', 'application/javascript');
+       }
+   }
+}));
 app.get('/', (req, res) => {
   res.sendFile(join(__dirname, 'client/index.html'));
-  res.sendFile(join(__dirname, 'client/script.js'));
 });
-var content;
-fs.readFile('/content.json', utf8, (error, data) => {
-  if (error){console.log('error getting content')}
-  else{content = data;};
+
+var content = {
+  players: {},
+  objects: []
+};
+
+//read contents
+fs.readFile('content.json', 'utf8', (error, data) => {
+  if (error) {
+    console.log('Error getting content:', error);
+  } else {
+    try {
+      content = JSON.parse(data);
+    } catch (error) {
+      console.log('Error parsing content:', error);
+    }
+  }
 });
+
 io.on('connection', (socket) => {
-  console.log('a wild user appeared!')
+  console.log('A wild user appeared!');
   socket.on('disconnect', () => {
-    console.log("user went bu bye")
+    console.log("User went bye-bye");
   });
-  socket.emit('getData', content)
+  socket.emit('getData', content);
   socket.on('name', (data) => {
-    for (let nameF in content.players){
-      if (nameF === data.name){
-        socket.emit('redoName')
+    for (let nameF in content.players) {
+      if (nameF === data.name) {
+        socket.emit('redoName');
+      } else {
+        continue;
       }
     }
   });
-  
 });
-var currentContent;
+
+var currentContent = {};
 loop();
-function loop(){
-  fs.readFile('content.json', isUtf8, (error, data) => {
-    if(error){console.error('error getting new content', error)}
-    try{
-      currentContent = JSON.parse(data);
-    }
-    catch (error){
-      console.error("error getting new content", error)
+
+function loop() {
+  fs.readFile('content.json', 'utf8', (error, data) => {
+    if (error) {
+      console.error('Error getting new content:', error);
+    } else {
+      try {
+        currentContent = JSON.parse(data);
+      } catch (error) {
+        console.error('Error parsing new content:', error);
+      }
     }
   });
-  if (JSON.stringify(content) !== JSON.stringify(currentContent)){
-    fs.writeFile('content.json', content, (err) => {
-      if (err){
-        console.error("error writing new content");
+
+  if (JSON.stringify(content) !== JSON.stringify(currentContent)) {
+    fs.writeFile('content.json', JSON.stringify(content, null, 2), (err) => {
+      if (err) {
+        console.error("Error writing new content:", err);
       }
     });
   }
-  setTimeout(loop, 16)
+
+  setTimeout(loop, 16);
 }
 
-  server.listen(3000, () => {
-    console.log('server running at http://localhost:3000');
-  });
+server.listen(3000, () => {
+  console.log('Server running at http://localhost:3000');
+});
