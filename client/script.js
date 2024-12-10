@@ -1,28 +1,41 @@
-
 function checkCollision(object1, object2) {
-  // Check if the objects are even close enough to potentially collide
   if (
     object1.x + object1.width < object2.x ||
     object1.x > object2.x + object2.width ||
     object1.y + object1.height < object2.y ||
-    object1.y > object2.y + object2.height
+    object1.y > object2.y + object2.height ||
+    object1.z + object1.length < object2.z ||
+    object1.z > object2.z + object2.length
   ) {
-    return false; // No collision
+    return false;
   } else {
-    return true; // Collision detected
+    return true;
   }
 }
-//variables
-let fogginessreverse = 213;
-const socket = io()
+function useVisualSize(object, distance) {
+  var before = object;
+  var returnable = {width: object.width/distance, height: object.height/distance, length: object.length/distance, x: object.x, y: object.y+distance, z: object.z};
+  if (returnable.width < 0) returnable.width = 0;
+  if (returnable.height < 0) returnable.height = 0;
+  object = before;
+  return returnable;
+}
+const FOGGINESS_REVERSE_DEFAULT = 213;
+let fogginessreverse = FOGGINESS_REVERSE_DEFAULT;
+const socket = io();
 var content = {
   players: {},
   objects: []
-}
-var redoName = false;
-const center = document.createElement('center')
-const cnv = document.createElement('canvas')
-var ctx = cnv.getContext('2d')
+};
+let redoName = false;
+let zBuffer =[]; //array to store depth values of pixels
+const center = document.createElement('center');
+const cnv = document.createElement('canvas');
+var ctx = cnv.getContext('2d');
+cnv.width = 800;
+cnv.height = 600;
+const canvasWidth = cnv.width;
+const canvasHeight = cnv.height;
 const nameField = document.createElement('input');
 nameField.setAttribute("type", "text");
 nameField.setAttribute("value", "enter name");
@@ -32,76 +45,130 @@ submitName.setAttribute("type", "button");
 submitName.setAttribute("value", "submit");
 document.body.appendChild(nameField);
 document.body.appendChild(submitName);
-submitName.addEventListener("mousedown", () => {
-  loop();
+submitName.addEventListener("click", () => {
   socket.emit("name", nameField.value);
-  setTimeout(()=>{
-    if (redoName){
-      nameField.setAttribute('value', 'name already taken')
-    }
-    else{
+  setTimeout(() => {
+    if (redoName) {
+      nameField.setAttribute('value', 'name already taken');
+    } else {
       namea = nameField.value;
       document.body.removeChild(nameField);
       document.body.removeChild(submitName);
       document.body.appendChild(center);
       center.appendChild(cnv);
+      loop();
     }
-  }, 100)
+  }, 100);
 });
+
+//init zbuffer with inf value to store many depth values
+for (let i = 0; i < canvasWidth; i++) {
+  zBuffer[i] = Infinity;
+}
+
+//functions to calculate depth to camera
+function calculateDistance(obj, camera) {
+  //im not this smart yes i looked up a tutorial on math.hypot
+  return Math.hypot(obj.x - camera.x, obj.y - camera.y, obj.z - camera.z);
+}
+
 function stringToBinary(str) {
   let binaryString = "";
   for (let i = 0; i < str.length; i++) {
     let charCode = str.charCodeAt(i);
-    let binaryChar = charCode.toString(2).padStart(8, '0'); // Pad with 0s to make 8 bits
+    let binaryChar = charCode.toString(2).padStart(8, '0');
     binaryString += binaryChar;
   }
   return binaryString;
 }
+
 function makeCamera(localPlayer) {
   return {
-    x: localPlayer.x - (localPlayer.width/2),
+    x: localPlayer.x - (localPlayer.width / 2),
     y: localPlayer.y + 10,
-    width: localPlayer.width,
-    height: localPlayer.height,
-    id: localPlayer.id
+    width: 1,
+    height: 1,
+    id: localPlayer.id,
+    angle: 0,
+    screenWidth: canvasWidth,
+    screenHeight: canvasHeight
+  };
+}
+
+
+let unsensitivity = 15;
+function getmouseanglefound(camera, prevmousepos, newmousepos) {
+  //get nearest angle realative to lets say arrow keys/wasd to move camera angle
+  //get camera angle first
+  let cameraangle = camera.angle;
+  //get mouse angle (left or right)
+  let mouseangle = () => {
+    //we need to find left or right realitive to prev mouse pos
+    let prev = prevmousepos;
+    let newpos = newmousepos;
+    if (prevmousepos.x > newmousepos.x + unsensitivity) {
+      //circumfular algorithm (i suck at trig so i found tutorial)
+      let angle = Math.atan2(newpos.y - prev.y, newpos.x - prev.x) * 180 / Math.PI;
+      return angle;
+    }
   }
+  //get the difference
+  let diff = cameraangle - mouseangle();
+  //package differencce with new angle just in case
+  let angles = {"diff": diff, "newangle": mouseangle()};
+  return angles;
 }
-function encrypt(key, data, clientKey){
-  var newDat = stringToBinary(data);
-  newDat += key;
-  newDat += clientKey;
+
+function encrypt(key, data, clientKey) {
+  const combinedData = data + clientKey;
+  return CryptoJS.AES.encrypt(combinedData, key).toString();
 }
-socket.on("update", (data, where)=>{
-  content[where] = data;
-});
-socket.on("getContent", (data)=> { 
+
+function decrypt(key, encryptedData) {
+  const bytes = CryptoJS.AES.decrypt(encryptedData, key);
+  return bytes.toString(CryptoJS.enc.Utf8);
+}
+
+socket.on("update", (data) => {
   content = data;
-})
+});
+
+socket.on("updatePlayer", (data) => {
+  content.players[data.id] = data;
+});
+
+socket.on("removePlayer", (data) => {
+  delete content.players[data.id];
+});
+
+socket.on("updateObject", (data) => {
+  content.objects[data.id] = data;
+});
+
+socket.on("getContent", (data) => {
+  content = data;
+});
+
 socket.on("redoName", () => {
   redoName = true;
 });
+
 socket.on("grantedLogin", (data) => {
-  if (data.statement = true){encrypt(data.key, namea, socket.id); }
+  if (data.statement === true) {
+    const decryptedKey = CryptoJS.AES.decrypt(data.key, socket.id).toString(CryptoJS.enc.Utf8);
+    const encryptedData = encrypt(decryptedKey, namea, socket.id);
+    // Handle the encrypted data as needed, e.g., send it back to the server or store it
+    console.log("Encrypted Data:", encryptedData);
+  }
 });
+
 let localcamera;
 if (fogginessreverse >= 200) fogginessreverse = 199;
-function loop(){
-  var localPlayerid = [socket.id];
-  var localPlayer = content.players[localPlayerid];
-  localcamera = makeCamera(localPlayer);
-  requestAnimationFrame(loop);
-  //clear before frames to ensure no overlapping
-  ctx.clearRect(0, 0, cnv.width, cnv.height);
-  render(content.objects, localcamera, fogginessreverse);
-}
-/*
-ATTENTION:
+let prevmousepos = {x: 0, y: 0};
+let newmousepos = {x: 0, y: 0};
+let keys = {};
 
-Color only uses rgba values
 
-Objects only support cubes currently
-*/
-//a grid to store cool pixels on
 class Grid {
   constructor(cellSize) {
     this.cellSize = cellSize;
@@ -109,11 +176,11 @@ class Grid {
   }
 
   _key(x, y) {
-    return `${Math.floor(x / this.cellSize)}, ${Math.floor(y / this.cellSize)}`
+    return `${Math.floor(x / this.cellSize)}, ${Math.floor(y / this.cellSize)}`;
   }
 
   insert(object) {
-    const key = this_.key(object.x, object.y);
+    const key = this._key(object.x, object.y);
     if (!this.cells.has(key)) {
       this.cells.set(key, []);
     }
@@ -121,20 +188,20 @@ class Grid {
   }
 
   retreive(x, y) {
-    const key = this_.key(x,y);
+    const key = this._key(x, y);
     return this.cells.get(key) || [];
   }
 
   clear() {
-    this.cells.clear;
+    this.cells.clear();
   }
 }
-//framebuffer to store pixels instead of a canvas because thats more memory demanding i think
+
 class Framebuffer {
   constructor(width, height) {
     this.width = width;
     this.height = height;
-    this.buffer = new Uint8ClampedArray(width * height * 4); //rgba for pixels because easier
+    this.buffer = new Uint8ClampedArray(width * height * 4);
   }
 
   clear(color = [0, 0, 0, 255]) {
@@ -148,12 +215,13 @@ class Framebuffer {
     const index = (y * this.width + x) * 4;
     this.buffer.set(color, index);
   }
+
   render(ctx) {
     const imageData = new ImageData(this.buffer, this.width, this.height);
     ctx.putImageData(imageData, 0, 0);
   }
 }
-//zbuffer to get closest object because the thing i had before was too complex 😞 respect for for loop that went on for decades just to find the closest object
+
 class ZBuffer {
   constructor(width, height) {
     this.width = width;
@@ -162,21 +230,21 @@ class ZBuffer {
   }
 
   setDepth(x, y, depth) {
-    //make sure that everything is in the viewport properly
     if (x < 0 || y < 0 || x >= this.width || y >= this.height) return;
-    const index = t * this.width + x;
+    const index = y * this.width + x;
     if (depth < this.buffer[index]) {
       this.buffer[index] = depth;
       return true;
     }
     return false;
   }
+
   clear() {
     this.buffer.fill(Infinity);
   }
 }
+
 function projectObject(obj, camera) {
-  //simplified perspective projection unlike first commit
   const scale = camera.focalLength / (camera.z - obj.z);
   return {
     screenX: obj.x * scale + camera.screenWidth / 2,
@@ -184,38 +252,103 @@ function projectObject(obj, camera) {
     depth: obj.z
   };
 }
+
 function precomputeProjections(objects, camera) {
   return objects.map(obj => ({
-    //get all objects array
     ...obj,
     projection: projectObject(obj, camera)
   }));
 }
-//this is what we've all been waiting for
+
 function render(objects, camera, framebuffer) {
-  objects.sort((a, b) => b.z - a.z)
+  objects.sort((a, b) => b.z - a.z);
 
   objects.forEach(obj => {
     const projection = projectObject(obj, camera);
-    drawProjectedObject(framebuffer, projection, obj.color)
+    drawProjectedObject(framebuffer, projection, obj.color);
   });
 }
-//someone told me this was bad but we're making a video game over here
+
 function drawProjectedObject(framebuffer, projection, color) {
-  for (let y = Math.floor(projection.screenY); y < projection.screenY + objheight; y++) {
-    for (let x = Math.floor(projection.screenX); x < projection.screenX + obj.height; x++) {
+  for (let y = Math.floor(projection.screenY); y < projection.screenY + obj.height; y++) {
+    for (let x = Math.floor(projection.screenX); x < projection.screenX + obj.width; x++) {
       framebuffer.setPixel(x, y, color);
     }
   }
 }
-//other things
-function darkenColor(color){
+
+function renderScene(camera) {
+  //clear zbuffer
+  zBuffer.fill(Infinity);
+
+  //reconstruct stuffs
+  for (let obj of content.objects) {
+    //is object in view?
+    const depth = calculateDistance(obj, camera);
+    
+    // Apply visual size scaling based on distance
+    const scaledObj = useVisualSize(obj, depth);
+
+    //if object is closer than already there object, render it
+    if (depth < zBuffer[Math.floor(scaledObj.y) * canvasWidth + Math.floor(scaledObj.x)]) {
+      //calculate 2d coords based on camera pos
+      const screenX = Math.floor((scaledObj.x - camera.x) * canvasWidth / 2 + canvasWidth / 2);
+      const screenY = Math.floor((scaledObj.y - camera.y) * canvasHeight / 2 + canvasHeight / 2);
+      
+      //check if object is in view
+      if (screenX >= 0 && screenX < canvasWidth && screenY >= 0 && screenY < canvasHeight) {
+        //draw obj with scaled dimensions
+        ctx.fillStyle = obj.color;
+        ctx.fillRect(screenX, screenY, scaledObj.width, scaledObj.height);
+      }
+    }
+  }
+}
+
+function drawPixel(x, y, color) {
+  const index = (y * canvasWidth + x) * 4;
+  const rgba = hslToRgb(color); //convert hsl to rgb
+  const data = ctx.createImageData(1, 1);
+  data.data[0] = rgba[0]; //red
+  data.data[1] = rgba[1]; //green
+  data.data[2] = rgba[2]; //blue
+  data.data[3] = 255; //alpha (255 is opaque)
+  ctx.putImageData(data, x, y);
+}
+
+function hslToRgb(hsl) {
+  const [h, s, l] = hsl.split(',').map(Number);
+  let r, g, b;
+
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+  const m = l - c / 2;
+
+  if (h >= 0 && h < 60) {
+    r = c; g = x; b = 0;
+  } else if (  h >= 60 && h < 120) {
+    r = x; g = c; b = 0;
+  } else if (h >= 120 && h < 180) {
+    r = 0; g = c; b = x;
+  } else if (h >= 180 && h < 240) {
+    r = 0; g = x; b = c;
+  } else if (h >= 240 && h < 300) {
+    r = x; g = 0; b = c;
+  } else {
+    r = c; g = 0; b = x;
+  }; r = Math.round((r + m) * 255); g = Math.round((g + m) * 255); b = Math.round((b + m) * 255);
+  return [r, g, b];
+}
+
+function darkenColor(color) {
   let [h, s, l] = color.split(',').map(Number);
-  l = Math.max(0, l - 10)
+  l = Math.max(0, l - 10);
   return `hsl(${h}, ${s}%, ${l}%)`;
-};
-function createObject(color, x, y, z, w, h, l){
+}
+
+function createObject(color, x, y, z, w, h, l, id) {
   var objectData = {
+    id: id,
     x: x,
     y: y,
     z: z,
@@ -223,21 +356,23 @@ function createObject(color, x, y, z, w, h, l){
     width: w,
     h: h,
     height: h,
-    l: l, 
+    l: l,
     length: l,
+    color: color,
     side1: color,
     side2: darkenColor(color),
     side3: color,
     side4: darkenColor(color),
     side5: color,
     side6: darkenColor(color)
-  }
+  };
   return objectData;
 }
+
 function createPlayer(color) {
   var playerData = {
-    x: Math.floor(Math.random * 30),
-    y: Math.floor(Math.random * 30),
+    x: Math.floor(Math.random() * 30),
+    y: Math.floor(Math.random() * 30),
     w: 5,
     width: 5,
     h: 40,
@@ -253,115 +388,137 @@ function createPlayer(color) {
   };
   return playerData;
 }
-/*old desolate memory-wasteful functions*
-function draw3D(objectsArray, camera, backgroundColor) {
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  const imageData = ctx.createImageData(canvas.width, canvas.height);
-
-  for (let y = 0; y < canvas.height; y++) {
-      for (let x = 0; x < canvas.width; x++) {
-          const objects = objectsArray.filter(obj => 
-              checkCollision(
-                  {x, y, width: 1, height: 1},
-                  {x: obj.x, y: obj.y, width: obj.width, height: obj.height}
-              )
-          );
-
-          if (objects.length) {
-              const unraveledObjects = objects.map(obj => ({
-                  ...unravelObject(obj),
-                  distance: calculateDistance(obj, camera)
-              }));
-
-              const closestObject = unraveledObjects.reduce((prev, curr) => 
-                  prev.distance < curr.distance ? prev : curr
-              );
-
-              const distortedObject = foldifyObject(closestObject, camera);
-              drawPixel(imageData, x, y, distortedObject.color);
-          }
-      }
+//loop
+document.onkeyup = (e) => {
+    var key = e.key;
+    keys[key] = false;
+};
+document.onkeydown = (e) => {
+    var key = e.key;
+    keys[key] = true;
+};
+function loop(event) {
+  var localPlayerid = socket.id;
+  var localPlayer = content.players[localPlayerid];
+  
+  if (!localPlayer) return;
+  
+  if (localPlayer.angle === undefined) {
+    localPlayer.angle = 0;
+    localPlayer.z = localPlayer.z || 0;
   }
 
-  ctx.putImageData(imageData, 0, 0);
-  return canvas;
+  updatePlayer(localPlayer);
+  localcamera = makeCamera(localPlayer);
+  
+  ctx.clearRect(0, 0, cnv.width, cnv.height);
+  ctx.fillStyle = "gray";
+  ctx.fillRect(0, 0, cnv.width, cnv.height);
+  render(content.objects, localcamera, fogginessreverse);
+  
+  //update camera angle
+  newmousepos = {x: event.clientX, y: event.clientY}; 
+  let newangle = getmouseanglefound(localcamera, prevmousepos, newmousepos).newangle;
+  prevmousepos = newmousepos;
+  localcamera.angle = newangle;
+  
+  //rendering thing
+  renderScene(localcamera);
+  requestAnimationFrame((event) => loop(event));
 }
 
-function foldifyObject(obj, camera) {
-  const sides = [
-      { pos: calculateSidePosition(1, obj), color: obj.side1 },
-      { pos: calculateSidePosition(2, obj), color: obj.side2 },
-      { pos: calculateSidePosition(3, obj), color: obj.side3 },
-      { pos: calculateSidePosition(4, obj), color: obj.side4 },
-      { pos: calculateSidePosition(5, obj), color: obj.side5 },
-      { pos: calculateSidePosition(6, obj), color: obj.side6 }
-  ];
+const PLAYER_SPEED = 2;
+const ROTATION_SPEED = 0.05;
+const JUMP_FORCE = 5;
+const GRAVITY = 0.2;
+let playerVelocityY = 0;
+let isJumping = false;
 
-  return sides.map(side => ({
-      ...side,
-      distortion: calculateDistortion(camera, side.pos)
-  }));
-}
-
-function unravelObject(obj) {
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  const sideWidth = obj.width;
-  const sideHeight = obj.height;
-
-  canvas.width = sideWidth * 4;
-  canvas.height = sideHeight * 4;
-
-  const sides = [
-      { color: obj.side1, x: sideWidth, y: 0, w: sideWidth, h: obj.length },
-      { color: obj.side2, x: sideWidth, y: sideHeight, w: sideWidth, h: sideHeight },
-      { color: obj.side3, x: sideWidth, y: sideHeight * 2, w: sideWidth, h: obj.length },
-      { color: obj.side4, x: sideWidth, y: sideHeight * 3, w: sideWidth, h: sideHeight },
-      { color: obj.side5, x: 0, y: sideHeight, w: obj.length, h: sideWidth },
-      { color: obj.side6, x: 0, y: sideHeight * 2, w: obj.length, h: sideWidth }
-  ];
-
-  sides.forEach(side => {
-      ctx.fillStyle = side.color;
-      ctx.fillRect(side.x, side.y, side.w, side.h);
-  });
-
-  return canvas;
-}
-
-function distortShape(factor, shape) {
-  const distorted = document.createElement('canvas');
-  const ctx = distorted.getContext('2d');
-
-  distorted.width = shape.width;
-  distorted.height = shape.height;
-
-  const imageData = ctx.createImageData(distorted.width, distorted.height);
-  const buffer = new Float32Array(distorted.width * distorted.height * 4);
-
-  for (let y = 0; y < distorted.height; y++) {
-      const yFactor = y / distorted.height;
-      for (let x = 0; x < distorted.width; x++) {
-          const distortedX = shape.x - (factor * x) + (factor * x * yFactor);
-          const index = (y * distorted.width + x) * 4;
-
-          buffer[index] = distortedX;
-          buffer[index + 1] = y;
-          buffer[index + 2] = shape.color;
-          buffer[index + 3] = 255;
-      }
+function updatePlayer(localPlayer) {
+  //store previous position for collision checking
+  const prevPos = { x: localPlayer.x, y: localPlayer.y, z: localPlayer.z };
+  
+  //movement relative to camera angle
+  if (keys["w"]) {
+    localPlayer.x += Math.cos(localPlayer.angle) * PLAYER_SPEED;
+    localPlayer.z += Math.sin(localPlayer.angle) * PLAYER_SPEED;
+  }
+  if (keys["s"]) {
+    localPlayer.x -= Math.cos(localPlayer.angle) * PLAYER_SPEED;
+    localPlayer.z -= Math.sin(localPlayer.angle) * PLAYER_SPEED;
+  }
+  if (keys["a"]) {
+    localPlayer.x -= Math.sin(localPlayer.angle) * PLAYER_SPEED;
+    localPlayer.z += Math.cos(localPlayer.angle) * PLAYER_SPEED;
+  }
+  if (keys["d"]) {
+    localPlayer.x += Math.sin(localPlayer.angle) * PLAYER_SPEED;
+    localPlayer.z -= Math.cos(localPlayer.angle) * PLAYER_SPEED;
   }
 
-  ctx.putImageData(imageData, 0, 0);
-  return distorted;
+  //rotate
+  if (keys["ArrowLeft"]) localPlayer.angle -= ROTATION_SPEED;
+  if (keys["ArrowRight"]) localPlayer.angle += ROTATION_SPEED;
+
+  //jump
+  if (keys[" "] && !isJumping) {
+    playerVelocityY = JUMP_FORCE;
+    isJumping = true;
+  }
+
+  //gravity 
+  playerVelocityY -= GRAVITY;
+  localPlayer.y += playerVelocityY;
+
+  //ground check
+  if (localPlayer.y <= 0) {
+    localPlayer.y = 0;
+    playerVelocityY = 0;
+    isJumping = false;
+  }
+
+  //collision check
+  for (let obj of Object.values(content.objects)) {
+    if (checkCollision(localPlayer, obj)) {
+      //restore position if collision occurred
+      localPlayer.x = prevPos.x;
+      localPlayer.y = prevPos.y;
+      localPlayer.z = prevPos.z;
+      break;
+    }
+  }
+
+  // Update player on server
+  socket.emit('updatePlayer', localPlayer);
 }
 
-function calculateDistance(point1, point2) {
-  return Math.hypot(point2.x - point1.x, point2.y - point1.y, point2.z - point1.z);
-}
+function loop(event) {
+  var localPlayerid = socket.id;
+  var localPlayer = content.players[localPlayerid];
+  
+  if (!localPlayer) return;
+  
+  // Initialize player properties if they don't exist
+  if (localPlayer.angle === undefined) {
+    localPlayer.angle = 0;
+    localPlayer.z = localPlayer.z || 0;
+  }
 
-function drawPixel(imageData, x, y, color) {
-  const index = (y * imageData.width + x) * 4;
-  imageData.data.set(color, index);
-}*/
+  updatePlayer(localPlayer);
+  localcamera = makeCamera(localPlayer);
+  
+  ctx.clearRect(0, 0, cnv.width, cnv.height);
+  ctx.fillStyle = "gray";
+  ctx.fillRect(0, 0, cnv.width, cnv.height);
+  render(content.objects, localcamera, fogginessreverse);
+  
+  //update camera angle
+  newmousepos = {x: event.clientX, y: event.clientY}; 
+  let newangle = getmouseanglefound(localcamera, prevmousepos, newmousepos).newangle;
+  prevmousepos = newmousepos;
+  localcamera.angle = newangle;
+  
+  //rendering thing
+  renderScene(localcamera);
+  requestAnimationFrame((event) => loop(event));
+}

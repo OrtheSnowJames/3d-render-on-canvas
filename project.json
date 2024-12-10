@@ -1,7 +1,0 @@
-{
-  name: "threeDimensionalRendering",
-  version: "0.0.1",
-  description: "Trying to make a 3d canvas render so I can make more complicated canvas socket.io games",
-  type: "commonjs",
-  dependencies: {}
-}

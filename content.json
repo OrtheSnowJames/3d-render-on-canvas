@@ -1,4 +1,1 @@
-{
-  "players": {},
-  "objects": []
-}
+{"players":{},"objects":{"1":{"x":1,"y":1,"z":1,"w":25,"width":25,"h":25,"height":25,"l":25,"id":1,"length":25,"color":"rgba(255, 0, 0, 1)","side1":"rgba(255, 0, 0, 1)","side2":"rgba(200, 0, 0, 1)","side3":"rgba(255, 0, 0, 1)","side4":"rgba(200, 0, 0, 1)","side5":"rgba(255, 0, 0, 1)","side6":"rgba(200, 0, 0, 1)"}}}

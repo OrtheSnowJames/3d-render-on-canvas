@@ -1,0 +1,114 @@
+the old code for client rendering:
+
+/*old desolate memory-wasteful functions*
+function draw3D(objectsArray, camera, backgroundColor) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const imageData = ctx.createImageData(canvas.width, canvas.height);
+
+  for (let y = 0; y < canvas.height; y++) {
+      for (let x = 0; x < canvas.width; x++) {
+          const objects = objectsArray.filter(obj => 
+              checkCollision(
+                  {x, y, width: 1, height: 1},
+                  {x: obj.x, y: obj.y, width: obj.width, height: obj.height}
+              )
+          );
+
+          if (objects.length) {
+              const unraveledObjects = objects.map(obj => ({
+                  ...unravelObject(obj),
+                  distance: calculateDistance(obj, camera)
+              }));
+
+              const closestObject = unraveledObjects.reduce((prev, curr) => 
+                  prev.distance < curr.distance ? prev : curr
+              );
+
+              const distortedObject = foldifyObject(closestObject, camera);
+              drawPixel(imageData, x, y, distortedObject.color);
+          }
+      }
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+  return canvas;
+}
+
+function foldifyObject(obj, camera) {
+  const sides = [
+      { pos: calculateSidePosition(1, obj), color: obj.side1 },
+      { pos: calculateSidePosition(2, obj), color: obj.side2 },
+      { pos: calculateSidePosition(3, obj), color: obj.side3 },
+      { pos: calculateSidePosition(4, obj), color: obj.side4 },
+      { pos: calculateSidePosition(5, obj), color: obj.side5 },
+      { pos: calculateSidePosition(6, obj), color: obj.side6 }
+  ];
+
+  return sides.map(side => ({
+      ...side,
+      distortion: calculateDistortion(camera, side.pos)
+  }));
+}
+
+function unravelObject(obj) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const sideWidth = obj.width;
+  const sideHeight = obj.height;
+
+  canvas.width = sideWidth * 4;
+  canvas.height = sideHeight * 4;
+
+  const sides = [
+      { color: obj.side1, x: sideWidth, y: 0, w: sideWidth, h: obj.length },
+      { color: obj.side2, x: sideWidth, y: sideHeight, w: sideWidth, h: sideHeight },
+      { color: obj.side3, x: sideWidth, y: sideHeight * 2, w: sideWidth, h: obj.length },
+      { color: obj.side4, x: sideWidth, y: sideHeight * 3, w: sideWidth, h: sideHeight },
+      { color: obj.side5, x: 0, y: sideHeight, w: obj.length, h: sideWidth },
+      { color: obj.side6, x: 0, y: sideHeight * 2, w: obj.length, h: sideWidth }
+  ];
+
+  sides.forEach(side => {
+      ctx.fillStyle = side.color;
+      ctx.fillRect(side.x, side.y, side.w, side.h);
+  });
+
+  return canvas;
+}
+
+function distortShape(factor, shape) {
+  const distorted = document.createElement('canvas');
+  const ctx = distorted.getContext('2d');
+
+  distorted.width = shape.width;
+  distorted.height = shape.height;
+
+  const imageData = ctx.createImageData(distorted.width, distorted.height);
+  const buffer = new Float32Array(distorted.width * distorted.height * 4);
+
+  for (let y = 0; y < distorted.height; y++) {
+      const yFactor = y / distorted.height;
+      for (let x = 0; x < distorted.width; x++) {
+          const distortedX = shape.x - (factor * x) + (factor * x * yFactor);
+          const index = (y * distorted.width + x) * 4;
+
+          buffer[index] = distortedX;
+          buffer[index + 1] = y;
+          buffer[index + 2] = shape.color;
+          buffer[index + 3] = 255;
+      }
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+  return distorted;
+}
+
+function calculateDistance(point1, point2) {
+  return Math.hypot(point2.x - point1.x, point2.y - point1.y, point2.z - point1.z);
+}
+
+function drawPixel(imageData, x, y, color) {
+  const index = (y * imageData.width + x) * 4;
+  imageData.data.set(color, index);
+}*/
