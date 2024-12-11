@@ -27,6 +27,67 @@ var content = {
   objects: []
 };
 
+function checkCollision(object1, objects) {
+  //if is array then make it singular object
+  if (Array.isArray(objects)) {
+    return objects.some(obj => checkCollision(object1, obj));
+  }
+
+  const object2 = objects;
+  return !(
+    object1.x + object1.width < object2.x ||
+    object1.x > object2.x + object2.width ||
+    object1.y + object1.height < object2.y ||
+    object1.y > object2.y + object2.height ||
+    object1.z + object1.length < object2.z ||
+    object1.z > object2.z + object2.length
+  );
+}
+
+function darkenRGBA(color) {
+  const [r, g, b, a] = color.replace('rgba(', '').replace(')', '').split(',').map(Number);
+  const darkenFactor = 0.8; //reduces brightness by 20% wow
+  return `rgba(${Math.floor(r * darkenFactor)}, ${Math.floor(g * darkenFactor)}, ${Math.floor(b * darkenFactor)}, ${a})`;
+}
+
+function darkenColor(color) {
+  if (color.startsWith('rgba')) {
+    return darkenRGBA(color);
+  } else if (color.startsWith('hsl')) {
+    let [h, s, l] = color.split(',').map(Number);
+    l = Math.max(0, l - 10);
+    return `hsl(${h}, ${s}%, ${l}%)`;
+  }
+  //default to RGBA if format is unknown
+  return darkenRGBA(color);
+}
+
+function createPlayer(color) {
+  var playerData = {
+    x: Math.floor(Math.random() * 30),
+    y: Math.floor(Math.random() * 30),
+    z: Math.floor(Math.random() * 30),
+    w: 5,
+    width: 5,
+    h: 40,
+    height: 40,
+    l: 5,
+    length: 5,
+    side1: color,
+    side2: darkenColor(color),
+    side3: color,
+    side4: darkenColor(color),
+    side5: color,
+    side6: darkenColor(color)
+  };
+  
+  //only check collision if there are objects to save cpu
+  if (content.objects && content.objects.length > 0 && checkCollision(playerData, content.objects)) {
+    return createPlayer(color);
+  }
+  return playerData;
+}
+
 //read contents
 fs.readFile('content.json', 'utf8', (error, data) => {
   if (error) {
@@ -42,16 +103,36 @@ fs.readFile('content.json', 'utf8', (error, data) => {
 
 io.on('connection', (socket) => {
   console.log('A wild user appeared!');
+
   socket.on('disconnect', () => {
     console.log("User went bye-bye");
+    if (content.players[socket.id]) {
+      delete content.players[socket.id];
+      socket.broadcast.emit('removePlayer', { id: socket.id });
+    }
   });
+
   socket.emit('getContent', content);
+
   socket.on('name', (data) => {
-    if (content.players[data]) {
+    let playerExists = Object.values(content.players).some(player => player.name === data);
+    
+    if (playerExists) {
       socket.emit('redoName');
     } else {
-      content.players[data] = { /* player data */ };
-      socket.emit('grantedLogin', { statement: true, key: 'someKey' });
+      content.players[socket.id] = {
+        ...createPlayer(`rgba(${Math.floor(Math.random() * 256)}, ${Math.floor(Math.random() * 256)}, ${Math.floor(Math.random() * 256)}, 1)`),
+        name: data,
+        id: socket.id
+      };
+      
+      socket.emit('grantedLogin', { 
+        statement: true, 
+        key: 'someKey',
+        playerId: socket.id,
+        playerData: content.players[socket.id]
+      });
+      
       io.emit('update', content);
     }
   });
@@ -60,7 +141,8 @@ io.on('connection', (socket) => {
     if (content.players[socket.id]) {
       content.players[socket.id] = {
         ...content.players[socket.id],
-        ...playerData
+        ...playerData,
+        id: socket.id
       };
       socket.broadcast.emit('updatePlayer', {
         id: socket.id,

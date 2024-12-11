@@ -12,6 +12,7 @@ function checkCollision(object1, object2) {
     return true;
   }
 }
+
 function useVisualSize(object, distance) {
   var before = object;
   var returnable = {width: object.width/distance, height: object.height/distance, length: object.length/distance, x: object.x, y: object.y+distance, z: object.z};
@@ -46,19 +47,24 @@ submitName.setAttribute("value", "submit");
 document.body.appendChild(nameField);
 document.body.appendChild(submitName);
 submitName.addEventListener("click", () => {
-  socket.emit("name", nameField.value);
-  setTimeout(() => {
-    if (redoName) {
-      nameField.setAttribute('value', 'name already taken');
-    } else {
-      namea = nameField.value;
-      document.body.removeChild(nameField);
-      document.body.removeChild(submitName);
-      document.body.appendChild(center);
-      center.appendChild(cnv);
-      loop();
-    }
-  }, 100);
+  if (nameField.value && nameField.value !== "enter name" && nameField.value !== "enter an actual name") {
+    socket.emit("name", nameField.value);
+    setTimeout(() => {
+      if (redoName) {
+        nameField.value = 'name already taken';
+        redoName = false;
+      } else {
+        namea = nameField.value;
+        document.body.removeChild(nameField);
+        document.body.removeChild(submitName);
+        document.body.appendChild(center);
+        center.appendChild(cnv);
+      }
+    }, 100);
+  }
+  else if (nameField.value === "enter name" || nameField.value === "enter an actual name") {
+    nameField.value = 'enter an actual name';
+  }
 });
 
 //init zbuffer with inf value to store many depth values
@@ -157,8 +163,13 @@ socket.on("grantedLogin", (data) => {
   if (data.statement === true) {
     const decryptedKey = CryptoJS.AES.decrypt(data.key, socket.id).toString(CryptoJS.enc.Utf8);
     const encryptedData = encrypt(decryptedKey, namea, socket.id);
-    // Handle the encrypted data as needed, e.g., send it back to the server or store it
     console.log("Encrypted Data:", encryptedData);
+    
+    const localPlayerId = data.playerId;
+    const localPlayerData = data.playerData;
+    content.players[localPlayerId] = localPlayerData;
+    //start game loop
+    loop();
   }
 });
 
@@ -260,12 +271,24 @@ function precomputeProjections(objects, camera) {
   }));
 }
 
-function render(objects, camera, framebuffer) {
-  objects.sort((a, b) => b.z - a.z);
+function render(objects, camera, fogginessreverse) {
+  //sort objects by distance
+  const sortedObjects = Object.values(objects).sort((a, b) => {
+    const distA = calculateDistance(a, camera);
+    const distB = calculateDistance(b, camera);
+    return distB - distA;
+  });
 
-  objects.forEach(obj => {
-    const projection = projectObject(obj, camera);
-    drawProjectedObject(framebuffer, projection, obj.color);
+  sortedObjects.forEach(obj => {
+    const depth = calculateDistance(obj, camera);
+    const scaledObj = useVisualSize(obj, depth);
+    
+    //apply fog effect
+    const fogFactor = Math.min(1, depth / fogginessreverse);
+    const color = obj.color;
+    
+    ctx.fillStyle = color;
+    ctx.fillRect(scaledObj.x, scaledObj.y, scaledObj.width, scaledObj.height);
   });
 }
 
@@ -403,28 +426,24 @@ function loop(event) {
   
   if (!localPlayer) return;
   
-  if (localPlayer.angle === undefined) {
-    localPlayer.angle = 0;
-    localPlayer.z = localPlayer.z || 0;
-  }
-
   updatePlayer(localPlayer);
   localcamera = makeCamera(localPlayer);
   
   ctx.clearRect(0, 0, cnv.width, cnv.height);
   ctx.fillStyle = "gray";
   ctx.fillRect(0, 0, cnv.width, cnv.height);
-  render(content.objects, localcamera, fogginessreverse);
   
-  //update camera angle
-  newmousepos = {x: event.clientX, y: event.clientY}; 
-  let newangle = getmouseanglefound(localcamera, prevmousepos, newmousepos).newangle;
-  prevmousepos = newmousepos;
-  localcamera.angle = newangle;
+  if (event) {
+    newmousepos = {x: event.clientX, y: event.clientY}; 
+    let angleData = getmouseanglefound(localcamera, prevmousepos, newmousepos);
+    if (angleData && angleData.newangle) {
+      localcamera.angle = angleData.newangle;
+    }
+    prevmousepos = newmousepos;
+  }
   
-  //rendering thing
   renderScene(localcamera);
-  requestAnimationFrame((event) => loop(event));
+  requestAnimationFrame(loop);
 }
 
 const PLAYER_SPEED = 2;
@@ -435,6 +454,7 @@ let playerVelocityY = 0;
 let isJumping = false;
 
 function updatePlayer(localPlayer) {
+  var updated = false;
   //store previous position for collision checking
   const prevPos = { x: localPlayer.x, y: localPlayer.y, z: localPlayer.z };
   
@@ -442,39 +462,45 @@ function updatePlayer(localPlayer) {
   if (keys["w"]) {
     localPlayer.x += Math.cos(localPlayer.angle) * PLAYER_SPEED;
     localPlayer.z += Math.sin(localPlayer.angle) * PLAYER_SPEED;
+    updated = true;
   }
   if (keys["s"]) {
     localPlayer.x -= Math.cos(localPlayer.angle) * PLAYER_SPEED;
     localPlayer.z -= Math.sin(localPlayer.angle) * PLAYER_SPEED;
+    updated = true;
   }
   if (keys["a"]) {
     localPlayer.x -= Math.sin(localPlayer.angle) * PLAYER_SPEED;
     localPlayer.z += Math.cos(localPlayer.angle) * PLAYER_SPEED;
+    updated = true;
   }
   if (keys["d"]) {
     localPlayer.x += Math.sin(localPlayer.angle) * PLAYER_SPEED;
     localPlayer.z -= Math.cos(localPlayer.angle) * PLAYER_SPEED;
+    updated = true;
   }
 
   //rotate
-  if (keys["ArrowLeft"]) localPlayer.angle -= ROTATION_SPEED;
-  if (keys["ArrowRight"]) localPlayer.angle += ROTATION_SPEED;
+  if (keys["ArrowLeft"]) localPlayer.angle -= ROTATION_SPEED; updated = true;
+  if (keys["ArrowRight"]) localPlayer.angle += ROTATION_SPEED; updated = true;
 
   //jump
   if (keys[" "] && !isJumping) {
     playerVelocityY = JUMP_FORCE;
     isJumping = true;
+    updated = true;
   }
 
   //gravity 
   playerVelocityY -= GRAVITY;
-  localPlayer.y += playerVelocityY;
+  localPlayer.y += playerVelocityY; if (localPlayer.y !== prevPos.y) updated = true;
 
   //ground check
   if (localPlayer.y <= 0) {
     localPlayer.y = 0;
     playerVelocityY = 0;
     isJumping = false;
+    updated = true;
   }
 
   //collision check
@@ -484,6 +510,7 @@ function updatePlayer(localPlayer) {
       localPlayer.x = prevPos.x;
       localPlayer.y = prevPos.y;
       localPlayer.z = prevPos.z;
+      changed = true;
       break;
     }
   }
@@ -492,33 +519,6 @@ function updatePlayer(localPlayer) {
   socket.emit('updatePlayer', localPlayer);
 }
 
-function loop(event) {
-  var localPlayerid = socket.id;
-  var localPlayer = content.players[localPlayerid];
-  
-  if (!localPlayer) return;
-  
-  // Initialize player properties if they don't exist
-  if (localPlayer.angle === undefined) {
-    localPlayer.angle = 0;
-    localPlayer.z = localPlayer.z || 0;
-  }
-
-  updatePlayer(localPlayer);
-  localcamera = makeCamera(localPlayer);
-  
-  ctx.clearRect(0, 0, cnv.width, cnv.height);
-  ctx.fillStyle = "gray";
-  ctx.fillRect(0, 0, cnv.width, cnv.height);
-  render(content.objects, localcamera, fogginessreverse);
-  
-  //update camera angle
-  newmousepos = {x: event.clientX, y: event.clientY}; 
-  let newangle = getmouseanglefound(localcamera, prevmousepos, newmousepos).newangle;
-  prevmousepos = newmousepos;
-  localcamera.angle = newangle;
-  
-  //rendering thing
-  renderScene(localcamera);
-  requestAnimationFrame((event) => loop(event));
-}
+cnv.addEventListener('mousemove', (event) => {
+  newmousepos = {x: event.clientX, y: event.clientY};
+});
